@@ -1,0 +1,56 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Build project
+        run: npm run build
+        
+      - name: Create .env file
+        run: |
+          cat > .env << EOL
+          DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_API_URL=https://api.deepseek.com/v1
+          SILICONFLOW_API_KEY=${{ secrets.SILICONFLOW_API_KEY }}
+          SILICONFLOW_API_URL=https://api.siliconflow.cn/v1
+          MAX_FILE_SIZE_KB=${{ vars.MAX_FILE_SIZE_KB }}
+          EOL
+        
+      - name: Deploy to server
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          source: ".output/,package.json,.env"
+          target: "/home/admin/code-checker-deploy"
+          
+      - name: Restart PM2
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            cd /home/admin/code-checker-deploy
+            npm ci --production
+            pm2 list
+            pm2 delete nuxt-app || true
+            pm2 start .output/server/index.mjs --name "nuxt-app"
